@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import urllib.error
 import urllib.request
 from typing import Any
@@ -59,11 +60,12 @@ def _payload(findings: list[dict[str, Any]], nonce: str) -> dict[str, Any]:
     }
 
 
-def explain(findings: list[dict[str, Any]], api_key: str | None = None, nonce: str = "n0nce") -> str | None:
+def explain(findings: list[dict[str, Any]], api_key: str | None = None, nonce: str | None = None) -> str | None:
     """One paragraph of plain English, or None when the model cannot be reached."""
     key = api_key or os.environ.get("DO_INFERENCE_KEY")
     if not key or not findings:
         return None
+    nonce = nonce or secrets.token_hex(4)
     request = urllib.request.Request(
         ENDPOINT,
         data=json.dumps(_payload(findings, nonce)).encode(),
@@ -75,7 +77,9 @@ def explain(findings: list[dict[str, Any]], api_key: str | None = None, nonce: s
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
         return None
     try:
-        text = body["choices"][0]["message"]["content"].strip()
+        content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         return None
-    return text or None
+    if not isinstance(content, str):
+        return None
+    return content.strip() or None

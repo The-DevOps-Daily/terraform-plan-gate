@@ -7,7 +7,9 @@ branding:
 
 inputs:
   plan:
-    description: Path to JSON from `terraform show -json <planfile>`.
+    description: >-
+      Path to JSON from `terraform show -json <planfile>`. Relative paths are
+      resolved against the workspace, not the action checkout.
     required: true
   fail-on:
     description: Lowest severity that fails the job (block, warn or note).
@@ -55,7 +57,11 @@ runs:
       env:
         DO_INFERENCE_KEY: ${{ inputs.explain == 'true' && inputs.do-inference-key || '' }}
       run: |
-        python -m plan_gate "${{ inputs.plan }}" \
+        case "${{ inputs.plan }}" in
+          /*) PLAN="${{ inputs.plan }}" ;;
+          *)  PLAN="$GITHUB_WORKSPACE/${{ inputs.plan }}" ;;
+        esac
+        python -m plan_gate "$PLAN" \
           --fail-on "${{ inputs.fail-on }}" \
           --comment "$RUNNER_TEMP/plan-gate.md" \
           --json "$RUNNER_TEMP/plan-gate.json" \

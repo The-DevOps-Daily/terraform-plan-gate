@@ -18,9 +18,19 @@ import sys
 from pathlib import Path
 
 from .explain import explain
-from .rules import BLOCK, NOTE, WARN, evaluate, verdict
+from .rules import BLOCK, NOTE, WARN, NotAPlan, evaluate, verdict
 
 ICON = {BLOCK: "🚫", WARN: "⚠️", NOTE: "ℹ️"}
+
+
+def cell(text: str) -> str:
+    """Untrusted text inside a Markdown table cell.
+
+    Resource names and attribute values come from the branch under review, so
+    a pipe or a newline in one of them would otherwise rewrite the table.
+    """
+    flat = " ".join(str(text).split())
+    return flat.replace("\\", "\\\\").replace("|", "\\|").replace("`", "'")
 
 
 def render(findings, counts, passed, prose: str | None, plan_path: str) -> str:
@@ -36,7 +46,7 @@ def render(findings, counts, passed, prose: str | None, plan_path: str) -> str:
         "| --- | --- | --- | --- |",
     ]
     for f in findings:
-        lines.append(f"| {ICON[f.severity]} | `{f.address}` | {f.rule} | {f.summary} |")
+        lines.append(f"| {ICON[f.severity]} | `{cell(f.address)}` | {cell(f.rule)} | {cell(f.summary)} |")
     lines.append("")
     if prose:
         lines += ["### What this means", "", prose, ""]
@@ -69,7 +79,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"plan_gate: cannot read {args.plan}: {err}", file=sys.stderr)
         return 2
 
-    findings = evaluate(plan)
+    try:
+        findings = evaluate(plan)
+    except NotAPlan as err:
+        # Refusing is the safe answer: a state file or a truncated download
+        # must never look like a plan with nothing in it.
+        print(f"plan_gate: {args.plan} is not a Terraform plan: {err}", file=sys.stderr)
+        return 2
     passed, counts = verdict(findings, args.fail_on)
     prose = None
     if findings and not args.no_explain:

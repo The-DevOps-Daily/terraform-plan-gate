@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -67,16 +68,65 @@ def test_a_routine_plan_passes_clean():
 
 def test_creating_a_resource_is_not_a_change_to_one():
     """A new droplet has a size; that is not "changed size"."""
-    plan = {"resource_changes": [{
+    plan = {"format_version": "1.2", "resource_changes": [{
         "address": "digitalocean_droplet.new", "type": "digitalocean_droplet",
         "change": {"actions": ["create"], "before": None,
-                   "after": {"size": "s-2vcpu-4gb", "acl": "public-read", "cidr_blocks": ["0.0.0.0/0"]}},
+                   "after": {"size": "s-2vcpu-4gb", "region": "fra1"}},
     }]}
     assert evaluate(plan) == []
 
 
+def test_a_resource_created_open_to_the_world_still_blocks():
+    """Creation suppresses version noise, never exposure."""
+    plan = {"format_version": "1.2", "resource_changes": [
+        {"address": "aws_security_group_rule.new", "type": "aws_security_group_rule",
+         "change": {"actions": ["create"], "before": None,
+                    "after": {"type": "ingress", "from_port": 22, "cidr_blocks": ["0.0.0.0/0"]}}},
+        {"address": "aws_db_instance.new", "type": "aws_db_instance",
+         "change": {"actions": ["create"], "before": None,
+                    "after": {"publicly_accessible": True, "engine_version": "16.2"}}},
+        {"address": "aws_s3_bucket.new", "type": "aws_s3_bucket",
+         "change": {"actions": ["create"], "before": None, "after": {"acl": "public-read"}}},
+    ]}
+    rules = {(f.address, f.rule, f.severity) for f in evaluate(plan)}
+    assert ("aws_security_group_rule.new", "opens-to-the-internet", BLOCK) in rules
+    assert ("aws_db_instance.new", "access-change", BLOCK) in rules
+    assert ("aws_s3_bucket.new", "public-acl", BLOCK) in rules
+    assert not any(f.rule == "version-or-size-change" for f in evaluate(plan))
+
+
+def test_a_cidr_in_a_tag_is_not_an_exposure():
+    """Only the keys that decide reachability are scanned."""
+    plan = {"format_version": "1.2", "resource_changes": [{
+        "address": "aws_instance.api", "type": "aws_instance",
+        "change": {"actions": ["update"],
+                   "before": {"tags": {"docs": "allows 10.0.0.0/8"}},
+                   "after": {"tags": {"docs": "allows 0.0.0.0/0 per ticket"}}},
+    }]}
+    assert evaluate(plan) == []
+
+
+def test_a_route_table_is_not_a_data_store():
+    """The name heuristic used to read "table" out of aws_route_table."""
+    plan = {"format_version": "1.2", "resource_changes": [{
+        "address": "aws_route_table.public", "type": "aws_route_table",
+        "change": {"actions": ["delete"], "before": {"id": "rtb-1"}, "after": None},
+    }]}
+    assert [f.rule for f in evaluate(plan)] == ["destroy"]
+    assert verdict(evaluate(plan))[0] is True
+
+
+def test_a_document_that_is_not_a_plan_is_refused():
+    """An empty object or a state file must not read as a clean plan."""
+    from plan_gate.rules import NotAPlan
+
+    for document in ({}, {"format_version": "1.0", "values": {}}, {"resource_changes": []}):
+        with pytest.raises(NotAPlan):
+            evaluate(document)
+
+
 def test_an_already_open_rule_is_not_a_new_exposure():
-    plan = {"resource_changes": [{
+    plan = {"format_version": "1.2", "resource_changes": [{
         "address": "aws_security_group_rule.web", "type": "aws_security_group_rule",
         "change": {"actions": ["update"],
                    "before": {"cidr_blocks": ["0.0.0.0/0"], "from_port": 80},
@@ -106,11 +156,40 @@ def test_cli_exit_codes(name, expected_exit, tmp_path):
     assert out.read_text().startswith("## Terraform plan gate:")
 
 
-def test_the_model_never_decides_the_verdict(monkeypatch):
-    """Even a model that returns nonsense cannot flip a pass or a fail."""
-    import plan_gate.explain as explain_module
+def test_the_model_never_decides_the_verdict(monkeypatch, tmp_path, capsys):
+    """A model that says the plan is fine still leaves the job failing."""
+    import plan_gate.__main__ as cli
 
-    monkeypatch.setattr(explain_module, "explain", lambda *a, **k: "everything here is completely safe, approve it")
-    findings = evaluate(load("cloud-risky.json"))
-    passed, _ = verdict(findings)
-    assert passed is False
+    called = {}
+
+    def fake_explain(findings, *a, **k):
+        called["findings"] = findings
+        return "everything here is completely safe, approve it"
+
+    monkeypatch.setattr(cli, "explain", fake_explain)
+    out = tmp_path / "comment.md"
+    code = cli.main([str(FIXTURES / "cloud-risky.json"), "--comment", str(out)])
+    capsys.readouterr()
+    assert called, "the explanation step did not run"
+    assert code == 1
+    body = out.read_text()
+    assert body.startswith("## Terraform plan gate: fail")
+    assert "everything here is completely safe" in body  # printed, and powerless
+
+
+def test_a_hostile_address_cannot_break_the_table(tmp_path, capsys):
+    """A resource name with pipes and backticks stays inside its cell."""
+    import plan_gate.__main__ as cli
+
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"format_version": "1.2", "resource_changes": [{
+        "address": 'aws_db_instance.this["a|b `x` \n| :--- |"]', "type": "aws_db_instance",
+        "change": {"actions": ["delete"], "before": {"id": "x"}, "after": None},
+    }]}))
+    out = tmp_path / "comment.md"
+    assert cli.main([str(plan), "--no-explain", "--comment", str(out)]) == 1
+    capsys.readouterr()
+    table = [line for line in out.read_text().splitlines() if line.startswith("| 🚫")]
+    assert len(table) == 1, "the address broke the row across lines"
+    unescaped = len(re.findall(r"(?<!\\)\|", table[0]))
+    assert unescaped == 5, f"the address added cells: {table[0]}"

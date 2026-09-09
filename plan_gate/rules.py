@@ -25,7 +25,8 @@ STATEFUL_TYPES = {
     "digitalocean_database_cluster", "digitalocean_volume", "digitalocean_spaces_bucket",
     "google_sql_database_instance", "google_storage_bucket", "google_compute_disk",
     "azurerm_postgresql_flexible_server", "azurerm_storage_account", "azurerm_managed_disk",
-    "kubernetes_persistent_volume_claim", "helm_release",
+    "kubernetes_persistent_volume_claim", "kubernetes_stateful_set",
+    "aws_elasticache_replication_group", "aws_redshift_cluster", "aws_docdb_cluster",
     "postgresql_database", "mysql_database", "mongodbatlas_cluster",
 }
 
@@ -34,7 +35,8 @@ EXPOSURE_KEYS = {
     "cidr_blocks", "ipv6_cidr_blocks", "source_ranges", "sources", "allowed_cidr_blocks",
     "publicly_accessible", "public_access", "public_network_access_enabled",
     "acl", "public_access_block", "block_public_acls", "block_public_policy",
-    "ingress", "inbound_rule", "security_rule", "firewall_rules",
+    "ingress", "inbound_rule", "security_rule", "firewall_rules", "rule", "rules",
+    "inbound_rules", "allow", "source_addresses",
     "assume_role_policy", "policy", "policy_arn", "role", "iam_role", "members", "bindings",
     "ssh_keys", "authorized_keys", "allow_ssh",
 }
@@ -86,6 +88,16 @@ def _flatten(value: Any, prefix: str = "") -> Iterable[tuple[str, Any]]:
         yield prefix, value
 
 
+def _cidrs_in_access(values: dict[str, Any]) -> set[str]:
+    """CIDRs under the keys that decide who may reach a resource.
+
+    Scanning the whole resource would read a CIDR out of a tag and call it
+    exposure, and would count an egress rule as an inbound one.
+    """
+    scoped = {k: v for k, v in values.items() if k in EXPOSURE_KEYS}
+    return _cidrs_in(scoped)
+
+
 def _cidrs_in(value: Any) -> set[str]:
     found: set[str] = set()
     for _, leaf in _flatten(value):
@@ -98,9 +110,9 @@ def _cidrs_in(value: Any) -> set[str]:
     return found
 
 
-def _opens_to_world(before: Any, after: Any) -> set[str]:
-    """CIDRs that reach everything and were not there before."""
-    return (_cidrs_in(after) & OPEN_CIDRS) - (_cidrs_in(before) & OPEN_CIDRS)
+def _opens_to_world(before: dict[str, Any], after: dict[str, Any]) -> set[str]:
+    """World-reachable CIDRs under access keys that were not there before."""
+    return (_cidrs_in_access(after) & OPEN_CIDRS) - (_cidrs_in_access(before) & OPEN_CIDRS)
 
 
 def _changed_keys(before: dict[str, Any], after: dict[str, Any], keys: set[str]) -> list[str]:
@@ -112,15 +124,30 @@ def _changed_keys(before: dict[str, Any], after: dict[str, Any], keys: set[str])
     return sorted(changed)
 
 
+#: A name heuristic for types not in the list above. It is deliberately narrow,
+#: because a false "this holds data" on something like aws_route_table trains
+#: people to ignore the gate. Anything it gets wrong belongs in STATEFUL_TYPES.
+STATEFUL_PATTERN = re.compile(
+    r"(_database|database_|_db_instance|_db_cluster|_rds_|_bucket|_volume|_disk$|_filesystem|_efs_|dynamodb_table|bigquery_table)"
+)
+
+
 def _is_stateful(resource_type: str) -> bool:
-    if resource_type in STATEFUL_TYPES:
-        return True
-    # Providers name things consistently enough for a fallback to be useful.
-    return bool(re.search(r"(database|_db_|_rds_|bucket|volume|disk|filesystem|efs|table)", resource_type))
+    return resource_type in STATEFUL_TYPES or bool(STATEFUL_PATTERN.search(resource_type))
+
+
+class NotAPlan(ValueError):
+    """The file is not Terraform plan JSON, so nothing was evaluated."""
 
 
 def evaluate(plan: dict[str, Any]) -> list[Finding]:
-    """Every finding in a plan, worst first. Pure: no I/O, no model."""
+    """Every finding in a plan, worst first. Pure: no I/O, no model.
+
+    Raises NotAPlan when the document is not plan JSON, so that state files,
+    an empty object or a truncated download cannot pass as a clean plan.
+    """
+    if not isinstance(plan, dict) or "format_version" not in plan or "resource_changes" not in plan:
+        raise NotAPlan("expected Terraform plan JSON with format_version and resource_changes")
     findings: list[Finding] = []
     for change in plan.get("resource_changes", []) or []:
         actions = _actions(change)
@@ -134,9 +161,12 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
         stateful = _is_stateful(rtype)
         deleting = "delete" in actions
         replacing = deleting and "create" in actions
-        # A resource that did not exist before has nothing to compare against:
-        # its attributes are the whole plan, not a change to a live thing.
-        creating_only = actions == ["create"]
+        # A resource that did not exist before has nothing to compare against,
+        # so its attributes are not "changes". Exposure is still checked
+        # against an empty baseline: a new rule open to the world is the same
+        # hole as an old one widened to it.
+        creating_only = set(actions) == {"create"}
+        baseline: dict[str, Any] = {} if creating_only else before
 
         if deleting and stateful:
             findings.append(Finding(
@@ -154,12 +184,13 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
         elif deleting:
             findings.append(Finding("destroy", WARN, address, rtype, "is destroyed", {"actions": actions}))
 
-        opened = set() if creating_only else _opens_to_world(before, after)
+        opened = _opens_to_world(baseline, after)
         # An ACL that names the public is an exposure change, not a spelling one.
         acl_before, acl_after = str(before.get("acl", "")), str(after.get("acl", ""))
         # private -> public-read and public-read -> public-read-write are both
         # widenings; only a move away from public is not.
-        public_acl = not creating_only and acl_after.startswith("public") and acl_after != acl_before
+        acl_before = "" if creating_only else acl_before
+        public_acl = acl_after.startswith("public") and acl_after != acl_before
         if opened:
             findings.append(Finding(
                 "opens-to-the-internet", BLOCK, address, rtype,
@@ -174,7 +205,9 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
                 {"before": acl_before, "after": acl_after},
             ))
 
-        exposure = [] if creating_only else _changed_keys(before, after, EXPOSURE_KEYS)
+        exposure = _changed_keys(baseline, after, EXPOSURE_KEYS) if not creating_only else (
+            ["publicly_accessible"] if after.get("publicly_accessible") is True else []
+        )
         if exposure and not opened and not public_acl:
             severity = BLOCK if {"publicly_accessible", "public_access", "public_network_access_enabled"} & set(exposure) and any(
                 after.get(k) is True for k in exposure
