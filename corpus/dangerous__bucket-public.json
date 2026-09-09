@@ -1,0 +1,25 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "aws_s3_bucket.assets",
+   "mode": "managed",
+   "type": "aws_s3_bucket",
+   "name": "assets",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "acl": "private"
+    },
+    "after": {
+     "acl": "public-read"
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "aws_cloudwatch_log_group.app",
+   "mode": "managed",
+   "type": "aws_cloudwatch_log_group",
+   "name": "app",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "retention_in_days": 365
+    },
+    "after": {
+     "retention_in_days": 1
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

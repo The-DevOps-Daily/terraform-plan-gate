@@ -1,0 +1,23 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "null_resource.provision",
+   "mode": "managed",
+   "type": "null_resource",
+   "name": "provision",
+   "change": {
+    "actions": [
+     "delete"
+    ],
+    "before": {
+     "id": "x"
+    },
+    "after": null,
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

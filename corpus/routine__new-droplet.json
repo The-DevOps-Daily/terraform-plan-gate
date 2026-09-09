@@ -1,0 +1,23 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "digitalocean_droplet.w",
+   "mode": "managed",
+   "type": "digitalocean_droplet",
+   "name": "w",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "before": null,
+    "after": {
+     "size": "s-1vcpu-1gb"
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

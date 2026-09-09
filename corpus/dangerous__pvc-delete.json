@@ -1,0 +1,23 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "kubernetes_persistent_volume_claim.data",
+   "mode": "managed",
+   "type": "kubernetes_persistent_volume_claim",
+   "name": "data",
+   "change": {
+    "actions": [
+     "delete"
+    ],
+    "before": {
+     "name": "data"
+    },
+    "after": null,
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

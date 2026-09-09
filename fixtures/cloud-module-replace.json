@@ -1,0 +1,51 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "module.cache.aws_elasticache_cluster.sessions",
+   "mode": "managed",
+   "type": "aws_elasticache_cluster",
+   "name": "sessions",
+   "provider_name": "registry.terraform.io/hashicorp/aws",
+   "change": {
+    "actions": [
+     "delete",
+     "create"
+    ],
+    "before": {
+     "cluster_id": "sessions",
+     "node_type": "cache.t3.micro",
+     "engine_version": "7.0"
+    },
+    "after": {
+     "cluster_id": "sessions",
+     "node_type": "cache.t4g.small",
+     "engine_version": "7.1"
+    },
+    "after_unknown": {},
+    "replace_paths": [
+     [
+      "node_type"
+     ]
+    ]
+   }
+  },
+  {
+   "address": "module.cache.aws_security_group.cache",
+   "mode": "managed",
+   "type": "aws_security_group",
+   "name": "cache",
+   "provider_name": "registry.terraform.io/hashicorp/aws",
+   "change": {
+    "actions": [
+     "no-op"
+    ],
+    "before": {},
+    "after": {},
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

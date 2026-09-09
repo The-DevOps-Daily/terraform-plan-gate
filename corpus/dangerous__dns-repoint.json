@@ -1,0 +1,29 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "aws_route53_record.www",
+   "mode": "managed",
+   "type": "aws_route53_record",
+   "name": "www",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "records": [
+      "203.0.113.10"
+     ]
+    },
+    "after": {
+     "records": [
+      "198.51.100.7"
+     ]
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

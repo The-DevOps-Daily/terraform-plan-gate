@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+fixtures/gen/.terraform/
+fixtures/gen/*.plan
+fixtures/gen/out/
+fixtures/gen/terraform.tfstate*
+fixtures/gen/.terraform.lock.hcl

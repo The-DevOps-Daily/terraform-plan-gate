@@ -1,0 +1,39 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "aws_security_group.web",
+   "mode": "managed",
+   "type": "aws_security_group",
+   "name": "web",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "ingress": [
+      {
+       "cidr_blocks": [
+        "10.0.0.0/8",
+        "10.1.0.0/16"
+       ]
+      }
+     ]
+    },
+    "after": {
+     "ingress": [
+      {
+       "cidr_blocks": [
+        "10.1.0.0/16",
+        "10.0.0.0/8"
+       ]
+      }
+     ]
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

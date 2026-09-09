@@ -1,0 +1,56 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "digitalocean_database_firewall.pg",
+   "mode": "managed",
+   "type": "digitalocean_database_firewall",
+   "name": "pg",
+   "provider_name": "registry.terraform.io/hashicorp/digitalocean",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "rule": [
+      {
+       "type": "ip_addr",
+       "value": "10.1.0.0/16"
+      }
+     ]
+    },
+    "after": {
+     "rule": [
+      {
+       "type": "ip_addr",
+       "value": "0.0.0.0/0"
+      }
+     ]
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  },
+  {
+   "address": "aws_iam_role.deployer",
+   "mode": "managed",
+   "type": "aws_iam_role",
+   "name": "deployer",
+   "provider_name": "registry.terraform.io/hashicorp/aws",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "assume_role_policy": "{\"Statement\":[{\"Principal\":{\"AWS\":\"arn:aws:iam::111:root\"}}]}"
+    },
+    "after": {
+     "assume_role_policy": "{\"Statement\":[{\"Principal\":\"*\"}]}"
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

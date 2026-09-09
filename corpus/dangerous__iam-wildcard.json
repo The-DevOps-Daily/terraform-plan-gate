@@ -1,0 +1,25 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "aws_iam_role.dep",
+   "mode": "managed",
+   "type": "aws_iam_role",
+   "name": "dep",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "assume_role_policy": "{\"Principal\":{\"AWS\":\"arn:aws:iam::1:root\"}}"
+    },
+    "after": {
+     "assume_role_policy": "{\"Principal\":\"*\"}"
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

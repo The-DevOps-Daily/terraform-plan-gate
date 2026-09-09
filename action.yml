@@ -1,0 +1,80 @@
+name: Terraform plan gate
+description: Fail a pull request on dangerous Terraform changes, and explain them in a comment.
+author: DevOps Daily
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  plan:
+    description: Path to JSON from `terraform show -json <planfile>`.
+    required: true
+  fail-on:
+    description: Lowest severity that fails the job (block, warn or note).
+    required: false
+    default: block
+  comment:
+    description: Post the findings as a pull request comment.
+    required: false
+    default: "true"
+  explain:
+    description: Ask DigitalOcean inference to write the explanation. Needs do-inference-key.
+    required: false
+    default: "true"
+  do-inference-key:
+    description: DigitalOcean inference API key. Without it the comment uses the rule text only.
+    required: false
+    default: ""
+  github-token:
+    description: Token used to post the comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  passed:
+    description: "true when the plan passes the gate"
+    value: ${{ steps.gate.outputs.passed }}
+  blocking:
+    description: Number of blocking findings.
+    value: ${{ steps.gate.outputs.blocking }}
+  warnings:
+    description: Number of warnings.
+    value: ${{ steps.gate.outputs.warnings }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Run the gate
+      id: gate
+      shell: bash
+      env:
+        DO_INFERENCE_KEY: ${{ inputs.explain == 'true' && inputs.do-inference-key || '' }}
+      run: |
+        python -m plan_gate "${{ inputs.plan }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          --comment "$RUNNER_TEMP/plan-gate.md" \
+          --json "$RUNNER_TEMP/plan-gate.json" \
+          ${{ inputs.explain == 'true' && ' ' || '--no-explain' }} || echo "gate_failed=1" >> "$GITHUB_ENV"
+      working-directory: ${{ github.action_path }}
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh pr comment "${{ github.event.pull_request.number }}" \
+          --repo "${{ github.repository }}" \
+          --body-file "$RUNNER_TEMP/plan-gate.md"
+
+    - name: Fail the job when the plan does not pass
+      if: env.gate_failed == '1'
+      shell: bash
+      run: |
+        echo "::error title=Terraform plan gate::the plan has findings at or above ${{ inputs.fail-on }}"
+        exit 1

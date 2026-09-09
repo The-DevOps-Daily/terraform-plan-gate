@@ -1,0 +1,25 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "kubernetes_deployment.api",
+   "mode": "managed",
+   "type": "kubernetes_deployment",
+   "name": "api",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "image": "api:1.2.0"
+    },
+    "after": {
+     "image": "api:1.3.0"
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}

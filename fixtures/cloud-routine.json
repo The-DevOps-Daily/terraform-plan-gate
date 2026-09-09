@@ -1,0 +1,73 @@
+{
+ "format_version": "1.2",
+ "terraform_version": "1.15.8",
+ "resource_changes": [
+  {
+   "address": "digitalocean_droplet.worker[2]",
+   "mode": "managed",
+   "type": "digitalocean_droplet",
+   "name": "worker[2]",
+   "provider_name": "registry.terraform.io/hashicorp/digitalocean",
+   "change": {
+    "actions": [
+     "create"
+    ],
+    "before": null,
+    "after": {
+     "name": "worker-3",
+     "region": "fra1",
+     "size": "s-2vcpu-4gb"
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  },
+  {
+   "address": "aws_instance.api",
+   "mode": "managed",
+   "type": "aws_instance",
+   "name": "api",
+   "provider_name": "registry.terraform.io/hashicorp/aws",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "tags": {
+      "env": "prod"
+     }
+    },
+    "after": {
+     "tags": {
+      "env": "prod",
+      "owner": "platform"
+     }
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  },
+  {
+   "address": "aws_autoscaling_group.workers",
+   "mode": "managed",
+   "type": "aws_autoscaling_group",
+   "name": "workers",
+   "provider_name": "registry.terraform.io/hashicorp/aws",
+   "change": {
+    "actions": [
+     "update"
+    ],
+    "before": {
+     "desired_capacity": 3,
+     "max_size": 6
+    },
+    "after": {
+     "desired_capacity": 5,
+     "max_size": 6
+    },
+    "after_unknown": {},
+    "replace_paths": []
+   }
+  }
+ ]
+}
