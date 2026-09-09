@@ -55,17 +55,21 @@ runs:
       id: gate
       shell: bash
       env:
+        # Inputs reach the shell as data. Interpolating them into the script
+        # would run whatever a branch put in a filename.
         DO_INFERENCE_KEY: ${{ inputs.explain == 'true' && inputs.do-inference-key || '' }}
+        PLAN_INPUT: ${{ inputs.plan }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        EXPLAIN: ${{ inputs.explain }}
       run: |
-        case "${{ inputs.plan }}" in
-          /*) PLAN="${{ inputs.plan }}" ;;
-          *)  PLAN="$GITHUB_WORKSPACE/${{ inputs.plan }}" ;;
+        set -euo pipefail
+        case "$PLAN_INPUT" in
+          /*) PLAN="$PLAN_INPUT" ;;
+          *)  PLAN="$GITHUB_WORKSPACE/$PLAN_INPUT" ;;
         esac
-        python -m plan_gate "$PLAN" \
-          --fail-on "${{ inputs.fail-on }}" \
-          --comment "$RUNNER_TEMP/plan-gate.md" \
-          --json "$RUNNER_TEMP/plan-gate.json" \
-          ${{ inputs.explain == 'true' && ' ' || '--no-explain' }} || echo "gate_failed=1" >> "$GITHUB_ENV"
+        args=("$PLAN" --fail-on "$FAIL_ON" --comment "$RUNNER_TEMP/plan-gate.md" --json "$RUNNER_TEMP/plan-gate.json")
+        [ "$EXPLAIN" = "true" ] || args+=(--no-explain)
+        python -m plan_gate "${args[@]}" || echo "gate_failed=1" >> "$GITHUB_ENV"
       working-directory: ${{ github.action_path }}
 
     - name: Comment on the pull request
@@ -73,10 +77,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
       run: |
-        gh pr comment "${{ github.event.pull_request.number }}" \
-          --repo "${{ github.repository }}" \
-          --body-file "$RUNNER_TEMP/plan-gate.md"
+        set -euo pipefail
+        gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$RUNNER_TEMP/plan-gate.md"
 
     - name: Fail the job when the plan does not pass
       if: env.gate_failed == '1'

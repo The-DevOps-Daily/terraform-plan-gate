@@ -22,15 +22,17 @@ comment keeps the rule text.
 
 | Rule | Severity | Fires when |
 | --- | --- | --- |
-| `stateful-destroy` | block | a type in `STATEFUL_TYPES`, or matching the name heuristic, is destroyed or replaced |
+| `stateful-destroy` | block | a type in `STATEFUL_TYPES`, or matching the name heuristic, is destroyed or replaced, so its contents are at risk |
 | `opens-to-the-internet` | block | `0.0.0.0/0` or `::/0` appears under an access key that did not have it, including on creation |
-| `public-acl` | block | an `acl` value becomes public, or changes between public values |
+| `public-acl` | block | an `acl` value becomes public, or widens between public values |
 | `access-change` | block or warn | `publicly_accessible` turning on blocks; other selected top-level access, IAM or policy keys warn |
 | `replace` | warn | any other resource is destroyed and recreated |
 | `destroy` | warn | any other resource is destroyed |
 | `version-or-size-change` | note, warn on stateful | an engine version, image, size or instance class changes |
 
-Two limits worth knowing before you trust it. Stateful detection is a list plus
+Three limits worth knowing before you trust it. Unknown-at-plan-time values
+(`after_unknown`) are not inspected, so an access value Terraform cannot
+resolve until apply is invisible here. Stateful detection is a list plus
 a name heuristic, so a type nobody thought of gets a warning rather than a
 block; add it to `STATEFUL_TYPES`. And access rules compare selected top-level
 keys, so a nested schema such as a Kubernetes network policy spec passes

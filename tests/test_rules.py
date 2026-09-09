@@ -100,8 +100,8 @@ def test_a_cidr_in_a_tag_is_not_an_exposure():
     plan = {"format_version": "1.2", "resource_changes": [{
         "address": "aws_instance.api", "type": "aws_instance",
         "change": {"actions": ["update"],
-                   "before": {"tags": {"docs": "allows 10.0.0.0/8"}},
-                   "after": {"tags": {"docs": "allows 0.0.0.0/0 per ticket"}}},
+                   "before": {"tags": {"allowed": "10.0.0.0/8"}},
+                   "after": {"tags": {"allowed": "0.0.0.0/0"}}},
     }]}
     assert evaluate(plan) == []
 
@@ -193,3 +193,60 @@ def test_a_hostile_address_cannot_break_the_table(tmp_path, capsys):
     assert len(table) == 1, "the address broke the row across lines"
     unescaped = len(re.findall(r"(?<!\\)\|", table[0]))
     assert unescaped == 5, f"the address added cells: {table[0]}"
+
+
+def test_narrowing_a_public_acl_warns_but_does_not_block():
+    """public-read-write to public-read is a tightening, still worth seeing."""
+    plan = {"format_version": "1.2", "resource_changes": [{
+        "address": "aws_s3_bucket.b", "type": "aws_s3_bucket",
+        "change": {"actions": ["update"], "before": {"acl": "public-read-write"}, "after": {"acl": "public-read"}},
+    }]}
+    findings = evaluate(plan)
+    assert [(f.rule, f.severity) for f in findings] == [("access-change", WARN)]
+    assert verdict(findings)[0] is True
+
+
+def test_public_flags_block_on_creation_too():
+    plan = {"format_version": "1.2", "resource_changes": [{
+        "address": "azurerm_postgresql_flexible_server.db", "type": "azurerm_postgresql_flexible_server",
+        "change": {"actions": ["create"], "before": None, "after": {"public_network_access_enabled": True}},
+    }]}
+    assert [(f.rule, f.severity) for f in evaluate(plan)] == [("access-change", BLOCK)]
+
+
+def test_turning_a_public_flag_off_does_not_block():
+    """A tightening that touches two access keys must not read as an opening."""
+    plan = {"format_version": "1.2", "resource_changes": [{
+        "address": "aws_db_instance.db", "type": "aws_db_instance",
+        "change": {"actions": ["update"],
+                   "before": {"publicly_accessible": True, "block_public_acls": False},
+                   "after": {"publicly_accessible": False, "block_public_acls": True}},
+    }]}
+    findings = evaluate(plan)
+    assert [f.severity for f in findings] == [WARN]
+
+
+def test_a_plan_with_null_fields_is_refused():
+    from plan_gate.rules import NotAPlan
+
+    for document in ({"format_version": None, "resource_changes": None},
+                     {"format_version": "1.2", "resource_changes": [{"address": "x"}]},
+                     {"format_version": "1.2", "resource_changes": [{"address": "x", "change": {}}]}):
+        with pytest.raises(NotAPlan):
+            evaluate(document)
+
+
+def test_values_are_not_sent_to_the_model():
+    """The payload describes the change; it does not carry attribute values."""
+    from plan_gate.explain import _payload
+
+    payload, dropped = _payload([{
+        "rule": "access-change", "severity": "warn", "address": "aws_iam_role.r", "type": "aws_iam_role",
+        "summary": "changes policy",
+        "detail": {"keys": ["assume_role_policy"], "before": {"assume_role_policy": "SECRET-VALUE"},
+                   "after": {"assume_role_policy": "OTHER-SECRET"}},
+    }], "n0nce")
+    body = json.dumps(payload)
+    assert "SECRET-VALUE" not in body and "OTHER-SECRET" not in body
+    assert "assume_role_policy" in body and dropped == 0
+

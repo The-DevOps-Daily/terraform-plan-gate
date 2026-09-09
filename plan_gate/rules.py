@@ -44,6 +44,9 @@ EXPOSURE_KEYS = {
 #: Attributes that change the identity or version of a managed service.
 VERSION_KEYS = {"engine_version", "version", "node_version", "kubernetes_version", "image", "size", "instance_class", "machine_type"}
 
+#: Booleans whose true value is the resource being reachable from outside.
+PUBLIC_FLAGS = ("publicly_accessible", "public_access", "public_network_access_enabled")
+
 OPEN_CIDRS = {"0.0.0.0/0", "::/0"}
 
 
@@ -146,8 +149,18 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
     Raises NotAPlan when the document is not plan JSON, so that state files,
     an empty object or a truncated download cannot pass as a clean plan.
     """
-    if not isinstance(plan, dict) or "format_version" not in plan or "resource_changes" not in plan:
-        raise NotAPlan("expected Terraform plan JSON with format_version and resource_changes")
+    if not isinstance(plan, dict):
+        raise NotAPlan("expected a JSON object")
+    if not isinstance(plan.get("format_version"), str):
+        raise NotAPlan("no format_version: this is not `terraform show -json` output")
+    changes = plan.get("resource_changes")
+    if not isinstance(changes, list):
+        raise NotAPlan("no resource_changes array: a state file is not a plan")
+    for entry in changes:
+        if not isinstance(entry, dict) or not isinstance(entry.get("change"), dict):
+            raise NotAPlan("a resource_changes entry has no change object")
+        if not isinstance(entry["change"].get("actions"), list):
+            raise NotAPlan(f"{entry.get('address', 'a resource')} has no actions")
     findings: list[Finding] = []
     for change in plan.get("resource_changes", []) or []:
         actions = _actions(change)
@@ -171,8 +184,8 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
         if deleting and stateful:
             findings.append(Finding(
                 "stateful-destroy", BLOCK, address, rtype,
-                "replaces a stateful resource, which loses its data" if replacing
-                else "destroys a stateful resource, which loses its data",
+                "replaces a resource that holds data, so its contents are at risk" if replacing
+                else "destroys a resource that holds data, so its contents are at risk",
                 {"actions": actions, "reasons": change.get("change", {}).get("replace_paths", [])},
             ))
         elif replacing:
@@ -189,8 +202,10 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
         acl_before, acl_after = str(before.get("acl", "")), str(after.get("acl", ""))
         # private -> public-read and public-read -> public-read-write are both
         # widenings; only a move away from public is not.
+        # public-read-write is wider than public-read, which is wider than none.
+        acl_rank = {"": 0, "private": 0, "authenticated-read": 1, "public-read": 2, "public-read-write": 3}
         acl_before = "" if creating_only else acl_before
-        public_acl = acl_after.startswith("public") and acl_after != acl_before
+        public_acl = acl_after.startswith("public") and acl_rank.get(acl_after, 2) > acl_rank.get(acl_before, 0)
         if opened:
             findings.append(Finding(
                 "opens-to-the-internet", BLOCK, address, rtype,
@@ -201,17 +216,18 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
         if public_acl:
             findings.append(Finding(
                 "public-acl", BLOCK, address, rtype,
-                f"changes its ACL from {acl_before or 'unset'} to {acl_after}, which anyone can read",
+                f"changes its ACL from {acl_before or 'unset'} to {acl_after}, a public grant at the bucket level",
                 {"before": acl_before, "after": acl_after},
             ))
 
-        exposure = _changed_keys(baseline, after, EXPOSURE_KEYS) if not creating_only else (
-            ["publicly_accessible"] if after.get("publicly_accessible") is True else []
-        )
+        # A key that turns public is blocking whether it was flipped or created that way.
+        turned_public = [
+            k for k in PUBLIC_FLAGS
+            if after.get(k) is True and (creating_only or before.get(k) is not True)
+        ]
+        exposure = _changed_keys(baseline, after, EXPOSURE_KEYS) if not creating_only else list(turned_public)
         if exposure and not opened and not public_acl:
-            severity = BLOCK if {"publicly_accessible", "public_access", "public_network_access_enabled"} & set(exposure) and any(
-                after.get(k) is True for k in exposure
-            ) else WARN
+            severity = BLOCK if turned_public else WARN
             findings.append(Finding(
                 "access-change", severity, address, rtype,
                 "changes who can reach it or what it may do: " + ", ".join(exposure),

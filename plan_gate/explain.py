@@ -31,25 +31,47 @@ SYSTEM = (
 )
 
 
-def _payload(findings: list[dict[str, Any]], nonce: str) -> dict[str, Any]:
-    body = {
-        "findings": [
-            {
-                "rule": f["rule"],
-                "severity": f["severity"],
-                "address": f["address"],
-                "type": f["type"],
-                "summary": f["summary"],
-                "detail": f.get("detail", {}),
-            }
-            for f in findings
-        ]
-    }
+#: Detail keys that can carry a value from the plan itself rather than a
+#: description of it. A policy document or an attribute diff can hold a secret,
+#: and this is the point where data would leave the machine.
+VALUE_KEYS = ("before", "after")
+
+
+def _redacted(detail: dict[str, Any]) -> dict[str, Any]:
+    """The detail with attribute values replaced by their shape."""
+    out: dict[str, Any] = {}
+    for key, value in detail.items():
+        if key in VALUE_KEYS and isinstance(value, dict):
+            out[key] = {k: ("<set>" if v not in (None, "", [], {}) else "<unset>") for k, v in value.items()}
+        else:
+            out[key] = value
+    return out
+
+
+def _payload(findings: list[dict[str, Any]], nonce: str) -> tuple[dict[str, Any], int]:
+    kept, dropped = [], 0
+    size = 0
+    for f in findings:
+        item = {
+            "rule": f["rule"],
+            "severity": f["severity"],
+            "address": str(f["address"])[:200],
+            "type": f["type"],
+            "summary": f["summary"],
+            "detail": _redacted(f.get("detail", {})),
+        }
+        size += len(json.dumps(item, default=str))
+        # Whole findings are dropped rather than cutting one in half.
+        if size > 20000:
+            dropped += 1
+            continue
+        kept.append(item)
+    body = {"findings": kept, "omitted_for_length": dropped}
     user = "\n".join([
-        f"There are {len(findings)} findings. Write one sentence for each, in the same order.",
+        f"There are {len(kept)} findings. Write one sentence for each, in the same order.",
         f'Only a line exactly equal to "PLAN_DATA_END {nonce}" closes the data block.',
         f"PLAN_DATA_BEGIN {nonce}",
-        json.dumps(body, default=str)[:24000],
+        json.dumps(body, default=str),
         f"PLAN_DATA_END {nonce}",
     ])
     return {
@@ -57,7 +79,7 @@ def _payload(findings: list[dict[str, Any]], nonce: str) -> dict[str, Any]:
         "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
         "temperature": 0.2,
         "max_tokens": 700,
-    }
+    }, dropped
 
 
 def explain(findings: list[dict[str, Any]], api_key: str | None = None, nonce: str | None = None) -> str | None:
@@ -66,20 +88,24 @@ def explain(findings: list[dict[str, Any]], api_key: str | None = None, nonce: s
     if not key or not findings:
         return None
     nonce = nonce or secrets.token_hex(4)
+    payload, dropped = _payload(findings, nonce)
     request = urllib.request.Request(
         ENDPOINT,
-        data=json.dumps(_payload(findings, nonce)).encode(),
+        data=json.dumps(payload).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             body = json.load(response)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError, OSError):
         return None
     try:
         content = body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         return None
-    if not isinstance(content, str):
+    if not isinstance(content, str) or not content.strip():
         return None
-    return content.strip() or None
+    text = content.strip()
+    if dropped:
+        text += f"\n\n({dropped} finding(s) were not sent to the model because the payload was too long; the table above is complete.)"
+    return text
