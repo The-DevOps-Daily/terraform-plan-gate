@@ -12,12 +12,12 @@
      "update"
     ],
     "before": {
-     "image": "ubuntu-24-04-x64",
-     "size": "s-2vcpu-4gb"
+     "size": "s-2vcpu-4gb",
+     "image": "ubuntu-24-04-x64"
     },
     "after": {
-     "image": "ubuntu-26-04-x64",
-     "size": "s-2vcpu-4gb"
+     "size": "s-4vcpu-8gb",
+     "image": "ubuntu-24-04-x64"
     },
     "after_unknown": {},
     "replace_paths": []

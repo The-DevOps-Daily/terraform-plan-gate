@@ -50,6 +50,15 @@ def _redacted(detail: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def redacted_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Findings with attribute values replaced by their shape.
+
+    Used for anything that leaves this machine: the model call, the pull
+    request comment and the JSON artefact.
+    """
+    return [{**f, "detail": _redacted(f.get("detail", {}))} for f in findings]
+
+
 def _payload(findings: list[dict[str, Any]], nonce: str) -> tuple[dict[str, Any], int]:
     kept, dropped = [], 0
     size = 0

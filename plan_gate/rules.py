@@ -151,7 +151,7 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
     """
     if not isinstance(plan, dict):
         raise NotAPlan("expected a JSON object")
-    if not isinstance(plan.get("format_version"), str):
+    if not isinstance(plan.get("format_version"), str) or not plan["format_version"].strip():
         raise NotAPlan("no format_version: this is not `terraform show -json` output")
     changes = plan.get("resource_changes")
     if not isinstance(changes, list):
@@ -159,8 +159,13 @@ def evaluate(plan: dict[str, Any]) -> list[Finding]:
     for entry in changes:
         if not isinstance(entry, dict) or not isinstance(entry.get("change"), dict):
             raise NotAPlan("a resource_changes entry has no change object")
-        if not isinstance(entry["change"].get("actions"), list):
+        actions = entry["change"].get("actions")
+        if not isinstance(actions, list) or not actions:
             raise NotAPlan(f"{entry.get('address', 'a resource')} has no actions")
+        if any(a not in {"no-op", "create", "read", "update", "delete"} for a in actions):
+            raise NotAPlan(f"{entry.get('address', 'a resource')} has an action Terraform does not emit")
+        if not isinstance(entry.get("address"), str) or not entry["address"]:
+            raise NotAPlan("a resource_changes entry has no address")
     findings: list[Finding] = []
     for change in plan.get("resource_changes", []) or []:
         actions = _actions(change)

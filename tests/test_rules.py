@@ -250,3 +250,51 @@ def test_values_are_not_sent_to_the_model():
     assert "SECRET-VALUE" not in body and "OTHER-SECRET" not in body
     assert "assume_role_policy" in body and dropped == 0
 
+
+def test_the_comment_does_not_carry_attribute_values(tmp_path, capsys):
+    """Whatever leaves the machine describes the change, not its contents."""
+    import plan_gate.__main__ as cli
+
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"format_version": "1.2", "resource_changes": [{
+        "address": "aws_iam_role.deployer", "type": "aws_iam_role",
+        "change": {"actions": ["update"],
+                   "before": {"assume_role_policy": "SECRET-BEFORE"},
+                   "after": {"assume_role_policy": "SECRET-AFTER"}},
+    }]}))
+    out, js = tmp_path / "comment.md", tmp_path / "findings.json"
+    cli.main([str(plan), "--no-explain", "--comment", str(out), "--json", str(js)])
+    capsys.readouterr()
+    for text in (out.read_text(), js.read_text()):
+        assert "SECRET-BEFORE" not in text and "SECRET-AFTER" not in text
+        assert "assume_role_policy" in text
+
+
+def test_an_unusable_model_response_leaves_the_gate_alone(monkeypatch, tmp_path, capsys):
+    """A body that is not JSON, or content that is not a string, returns no prose."""
+    import io
+    import plan_gate.explain as explain_module
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    for body in (b"\xff\xfe not json", b'{"choices": [{"message": {"content": null}}]}', b"{}"):
+        monkeypatch.setattr(explain_module.urllib.request, "urlopen", lambda *a, **k: FakeResponse(body))
+        assert explain_module.explain([{"rule": "destroy", "severity": "warn", "address": "a", "type": "t",
+                                        "summary": "s", "detail": {}}], api_key="test") is None
+
+
+def test_long_plans_drop_whole_findings(monkeypatch):
+    from plan_gate.explain import _payload
+
+    findings = [{"rule": "destroy", "severity": "warn", "address": f"aws_instance.n{i}", "type": "aws_instance",
+                 "summary": "x" * 400, "detail": {"actions": ["delete"]}} for i in range(200)]
+    payload, dropped = _payload(findings, "n0nce")
+    body = json.loads(payload["messages"][1]["content"].split("PLAN_DATA_BEGIN n0nce\n")[1].split("\nPLAN_DATA_END")[0])
+    assert dropped > 0 and body["omitted_for_length"] == dropped
+    assert all(set(f) == {"rule", "severity", "address", "type", "summary", "detail"} for f in body["findings"])
+

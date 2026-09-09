@@ -86,6 +86,9 @@ runs:
     - name: Fail the job when the plan does not pass
       if: env.gate_failed == '1'
       shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
       run: |
-        echo "::error title=Terraform plan gate::the plan has findings at or above ${{ inputs.fail-on }}"
+        set -euo pipefail
+        echo "::error title=Terraform plan gate::the plan has findings at or above $FAIL_ON"
         exit 1

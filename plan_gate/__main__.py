@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from .explain import explain
+from .explain import explain, redacted_findings
 from .rules import BLOCK, NOTE, WARN, NotAPlan, evaluate, verdict
 
 ICON = {BLOCK: "🚫", WARN: "⚠️", NOTE: "ℹ️"}
@@ -54,7 +54,7 @@ def render(findings, counts, passed, prose: str | None, plan_path: str) -> str:
         "<details><summary>Findings as JSON</summary>",
         "",
         "```json",
-        json.dumps([f.as_dict() for f in findings], indent=2),
+        json.dumps(redacted_findings([f.as_dict() for f in findings]), indent=2),
         "```",
         "",
         "</details>",
@@ -95,7 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.comment:
         Path(args.comment).write_text(comment)
     if args.json_out:
-        Path(args.json_out).write_text(json.dumps([f.as_dict() for f in findings], indent=2))
+        # Attribute values stay on the machine that ran the plan.
+        Path(args.json_out).write_text(json.dumps(redacted_findings([f.as_dict() for f in findings]), indent=2))
     print(comment)
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
